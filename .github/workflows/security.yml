@@ -1,0 +1,97 @@
+name: security
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret Scanning (Gitleaks 8.30.1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Gitleaks installieren
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" version
+      - name: Gitleaks scannen (gesamte Git-Historie)
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" .
+      - name: Bericht hochladen
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gitleaks
+          path: ${{ runner.temp }}/gitleaks.json
+
+  osv-scanner:
+    name: SCA (OSV-Scanner 2.7.0)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: OSV-Scanner installieren
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/osv-scanner" https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64
+          echo "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b  $RUNNER_TEMP/osv-scanner" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          "$RUNNER_TEMP/osv-scanner" --version
+      - name: OSV-Scanner scannen
+        run: |
+          "$RUNNER_TEMP/osv-scanner" scan source -r --format json --output-file "$RUNNER_TEMP/osv-scanner.json" .
+      - name: Bericht hochladen
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: osv-scanner
+          path: ${{ runner.temp }}/osv-scanner.json
+
+  opengrep:
+    name: SAST (Opengrep 1.33.0)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Opengrep und Regelsatz installieren
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/opengrep" https://github.com/opengrep/opengrep/releases/download/v1.33.0/opengrep_manylinux_x86
+          echo "2545812755572e1355ea60f96288f82a26eebed7fc8b512430d49d5667214c24  $RUNNER_TEMP/opengrep" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/opengrep"
+          "$RUNNER_TEMP/opengrep" --version
+          git clone --quiet https://github.com/opengrep/opengrep-rules "$RUNNER_TEMP/opengrep-rules"
+          git -C "$RUNNER_TEMP/opengrep-rules" checkout --quiet f1d2b562b414783763fd02a6ed2736eaed622efa
+      - name: Opengrep scannen (Python-Regeln)
+        run: |
+          "$RUNNER_TEMP/opengrep" scan --config "$RUNNER_TEMP/opengrep-rules/python" --json --output "$RUNNER_TEMP/opengrep.json" .
+      - name: Bericht hochladen
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: opengrep
+          path: ${{ runner.temp }}/opengrep.json
+
+  trivy:
+    name: Container und IaC (Trivy 0.76.1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trivy scannen (Konfigurationsdateien)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: json
+          output: ${{ runner.temp }}/trivy.json
+          version: v0.76.1
+          cache-dir: ${{ runner.temp }}/trivy-cache
+      - name: Bericht hochladen
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: trivy
+          path: ${{ runner.temp }}/trivy.json
